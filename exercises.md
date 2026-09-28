@@ -144,4 +144,11 @@ Ghi lại **một** lỗi bạn gặp khi deploy lên cloud (build fail, health 
 timeout, sai REDIS_URL, app không đọc `$PORT`...): thông báo lỗi là gì, bạn
 tìm ra nguyên nhân bằng cách nào, và sửa ra sao?
 
-> *Câu trả lời của bạn*
+> **Lỗi gặp thật:** build image lần đầu (bước chuẩn bị để deploy) fail ngay ở bước kéo base image:
+> `failed to resolve reference "docker.io/library/hello-world:latest": ... context deadline exceeded`, thử mirror thì `lookup mirror.gcr.io: no such host`.
+>
+> **Tìm nguyên nhân:** `curl` tới `registry-1.docker.io` có lúc 401 sau 8s, có lúc timeout → không phải bị chặn hẳn. Đo DNS: `dig google.com` mất **13,3 giây** với DNS của mạng (10.140.64.99), trong khi `dig @1.1.1.1` chỉ 0,08s (còn `@8.8.8.8` bị chặn). Docker hết thời gian chờ ngay ở bước phân giải tên miền.
+>
+> **Sửa:** đổi DNS Wi-Fi sang `1.1.1.1 / 1.0.0.1` (`networksetup -setdnsservers Wi-Fi 1.1.1.1 1.0.0.1`), restart Docker Desktop → `hello-world` chạy được. Mạng vẫn chập chờn (lần kéo `python:3.11-slim` đứt ở 9,8/30 MB với `unexpected EOF`) nên mình bọc lệnh `docker pull/build` trong vòng thử lại.
+>
+> **Lỗi chặn trước khi deploy:** `railway.toml` mẫu có `startCommand = "uvicorn ... --port $PORT"`. Với builder Dockerfile, Railway chạy lệnh này không qua shell nên `$PORT` không được nội suy → uvicorn sẽ nhận chuỗi `$PORT`. Mình bỏ `startCommand` để Railway dùng `CMD ["sh","-c","exec uvicorn ... --port ${PORT:-8000}"]` trong Dockerfile. Kết quả: deploy thành công ngay lần đầu, log `Uvicorn running on http://0.0.0.0:8080` — đúng cổng Railway cấp, `/health` 200, `/ready` 200 (Redis nối qua `redis.railway.internal`).
