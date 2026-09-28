@@ -35,10 +35,46 @@ services:
       timeout: 3s
       retries: 5
 
-  # TODO (CP2): khai báo service `agent` ở đây
-  # agent:
-  #   build: .
-  #   ...
+  agent:
+    build: .
+    # Map cổng host qua biến để có thể scale nhiều bản sau nginx:
+    #   AGENT_PORT_MAPPING=8000 docker compose up --scale agent=3  (xem LAB_GUIDE)
+    ports:
+      - "${AGENT_PORT_MAPPING:-8000:8000}"
+    environment:
+      PORT: "8000"
+      # Secret đọc từ file .env cùng thư mục, không viết thẳng vào đây
+      AGENT_API_KEY: ${AGENT_API_KEY}
+      # Trong mạng compose, hostname = tên service
+      REDIS_URL: redis://redis:6379/0
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-10}
+      MONTHLY_BUDGET_USD: ${MONTHLY_BUDGET_USD:-10.0}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      start_period: 10s
+      retries: 3
+    # Cho uvicorn đủ thời gian xử lý nốt request trước khi Docker gửi SIGKILL
+    stop_grace_period: 30s
+    restart: unless-stopped
+
+  # Mở rộng tùy chọn (không bắt buộc): load balancer round-robin trước N agent.
+  #   AGENT_PORT_MAPPING=8000 docker compose --profile lb up -d --scale agent=3
+  #   -> gọi qua http://localhost:8080
+  nginx:
+    image: nginx:1.27-alpine
+    profiles: ["lb"]
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - agent
 
 volumes:
   redis-data:
